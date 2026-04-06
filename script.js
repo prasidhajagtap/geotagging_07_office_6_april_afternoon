@@ -151,9 +151,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedTheme = localStorage.getItem(KEY_THEME) || 'auto';
   _themeMode = savedTheme;
   applyTheme(_themeMode);
-
+function setTx(
   setTx('daily-greet', GREETINGS[new Date().getDay()]);
-
+);
   const lastId = localStorage.getItem(KEY_ID);
   if (lastId) { const el = g('inp-id'); if (el) el.value = lastId; }
 
@@ -398,6 +398,8 @@ function setupLoginValidation() {
    START DAY
    Prasidha: Re-validates on click (not just on input events).
 */
+console.log(g); // Error: Cannot access 'g' before initialisation
+let g = "some value";
 g('btn-start').addEventListener('click', () => {
   const name = g('inp-name').value.trim();
   const id   = g('inp-id').value.trim();

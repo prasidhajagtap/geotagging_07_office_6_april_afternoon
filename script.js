@@ -1118,7 +1118,7 @@ function toast(msg, type = '') {
 */
 
 /** g — shorthand getElementById */
-const g = id => document.getElementById(id);
+g = id => document.getElementById(id);
 
 /** setTx — sets textContent safely, no-ops if element missing */
 const setTx = (id, v) => { const e = g(id); if (e) e.textContent = v; };

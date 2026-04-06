@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Seamex · Geo Attendance</title>
+
+  <!--
+    SEAMEX GEO-ATTENDANCE | index.html | v07
+    Author : Prasidha Jagtap
+    Role   : Assistant Manager – IT, Aditya Birla Group (Seamex)
+    Office : Reliable Tech Park, Airoli, Maharashtra
+
+    FILE STRUCTURE
+    ─────────────────────────────────────────────
+    index.html  ← you are here (HTML structure)
+    style.css   ← all CSS, design tokens, animations
+    script.js   ← all JS, business logic, GPS, state
+
+    HTML ELEMENT INDEX — Prasidha
+    ─────────────────────────────────────────────
+    OVERLAYS
+      #toast-ov        Toast backdrop overlay
+      #toast-pill      Toast message pill
+      #modal-ov        Modal backdrop overlay
+        #m-icon        Modal emoji icon
+        #m-title       Modal headline
+        #m-body        Modal explanation text
+        #m-edit-in     Modal location edit input (Fix Clock-In only)
+          #edit-in-inp   Location correction input
+          #edit-in-err   Validation error for that input
+        #m-btns        Modal action buttons (built dynamically by showModal)
+
+    PAGE TRANSITION
+      #pg-tr           Full-screen clock overlay between screens
+        .pt-ring       Pulsing ring around transition clock
+        #pt-h/m/s      Transition clock hands (rotated by JS)
+        #pt-parts      Floating time-emoji particle container
+        #pt-msg        "Switching view…" message
+
+    MAIN CARD — .smx-card
+      AUTH SECTION — #auth-sec
+        .auth-logo     Seamex logo (centered on login)
+        .mod-name      "GEO ATTENDANCE" module label
+        #daily-greet   Day-of-week greeting (set by JS)
+        .auth-title    "Welcome — Start Your Day"
+        #inp-name      Full Name input
+        #err-name      Inline validation error for name
+        #inp-id        Poornata ID input
+        #err-id        Inline validation error for ID
+        #inline-loader SVG clock loader shown during Start Day transition
+          #ac-h/m/s    Auth clock SVG hands
+          #ld-msg      Loader message text
+        #btn-start     Start Day CTA (disabled until form valid)
+        AUTH FOOTER
+          .theme-btn   Dark/light toggle (cycleTheme on click)
+          .rcv-btn     Recovery ↺ button (hidden, shown after 5s stuck)
+          .rcv-tip     "Page stuck? Tap to recover" tooltip
+
+      MAIN SECTION — #main-sec
+        MAIN HEADER
+          #disp-name   Employee name (set from U.name)
+          #disp-id     Poornata ID  (set from U.id)
+          .logo-sm     Seamex logo (top-right)
+          .mhr-mod     "GEO ATTENDANCE" label (top-right)
+          #hdr-clock   Live HH:MM:SS clock (updated by rAF loop)
+          #hdr-date    Full date string (updated by rAF loop)
+
+        STATUS CARD — #status-card (hidden until clock-in)
+          col-dur column:
+            #timer-val   Live shift duration (updated by rAF loop)
+          col-in column:
+            #ci-time     Clock-in time (fmt from U.clockIn)
+            #ci-loc      Clock-in location badge
+
+        CLOCK-IN GROUP — #ci-grp
+          #in-chips    Quick-select chip buttons (last 3 locations)
+          #in-loc      Location name input
+          #err-in-loc  Inline validation error
+          #in-drop     Autocomplete dropdown
+          #btn-ci      Clock In CTA
+
+        CLOCK-OUT GROUP — #co-grp
+          #redo-banner Redo context banner (hidden unless inRedoMode)
+            #redo-prev  "Previously: HH:MM at Location" text
+          #out-chips   Quick-select chip buttons
+          #out-loc     Location name input
+          #err-out-loc Inline validation error
+          #out-drop    Autocomplete dropdown
+          #btn-co      Clock Out CTA
+
+        GHOST SKELETON — #ghost-scr
+          #ghost-note  Rotating message during GPS fetch / submit
+
+        REVIEW CARD — #review-wrap
+          #r-in-t     Clock-in time display
+          #r-in-l     Clock-in location display
+          #r-out-t    Clock-out time display
+          #r-out-l    Clock-out location display
+          #r-dur      Shift duration display
+          promptFixIn()   Fix Clock-In button → modal
+          promptRedoOut() Redo Clock-Out button → modal
+          #btn-submit Submit the Day CTA
+
+        SUCCESS CARD — #suc-card
+          .tick-wrap  Tick circle + continuous halo rings
+          #ss-in-t    Clock-in time
+          #ss-in-l    Clock-in location
+          #ss-out-t   Clock-out time
+          #ss-out-l   Clock-out location
+          #ss-dur     Shift duration
+          #ss-date    Full date string
+
+        MAIN FOOTER
+          .theme-btn   Dark/light toggle
+          .rcv-btn     Recovery ↺ button
+          .rcv-tip     Tooltip
+
+    MIGRATION NOTE (Prasidha)
+    ─────────────────────────────────────────────
+    Azure AD SSO: replace #auth-sec block with MSAL redirect.
+    Map: Azure displayName → U.name | employeeId → U.id
+    Zero changes needed in #main-sec after migration.
+  -->
+
+  <!-- Pico CSS v2: semantic responsive base, dark/light tokens -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+
+  <!--
+    DM Sans: all body text, labels, buttons
+    DM Mono: all numeric displays — clock, timer, IDs, timestamps
+    Loaded via Google Fonts CDN. Both weights preconnected for speed.
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600;9..40,700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+  <!-- Supabase JS v2: attendance database client -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+
+  <!-- App stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!--
+  TOAST OVERLAY — Prasidha
+  Single instance, reused per call in toast().
+  Backdrop blur draws reader focus. 1.5s auto-dismiss.
+  aria-live="assertive" announces message to screen readers immediately.
+-->
+<div id="toast-ov" class="toast-ov hidden" role="alert" aria-live="assertive" aria-atomic="true">
+  <div id="toast-pill" class="toast-pill"></div>
+</div>
+
+<!--
+  MODAL OVERLAY — Prasidha
+  Generic confirmation dialog. Content set by showModal() in script.js.
+  All text set via textContent (never innerHTML) — XSS safe.
+-->
+<div id="modal-ov" role="dialog" aria-modal="true" aria-labelledby="m-title">
+  <div class="modal-card">
+    <div class="m-icon"  id="m-icon">ℹ️</div>
+    <p  class="m-title" id="m-title">Confirm</p>
+    <p  class="m-body"  id="m-body">Are you sure?</p>
+    <!--
+      m-edit-in: location correction input — visible only in Fix Clock-In modal.
+      Validated with isValidLoc() in script.js before applying.
+    -->
+    <div id="m-edit-in" class="hidden mt12">
+      <div class="inp-wrap">
+        <input type="text" id="edit-in-inp"
+          placeholder="Correct location name"
+          maxlength="60" autocomplete="off">
+        <div class="err-msg" id="edit-in-err">Letters, numbers, spaces, hyphens only</div>
+      </div>
+    </div>
+    <div class="m-btns mt12" id="m-btns"></div>
+  </div>
+</div>
+
+<!--
+  PAGE TRANSITION OVERLAY — Prasidha
+  CRED-style. Full-screen clock + floating time emojis between screens.
+  pt-h/m/s: clock hands rotated by tickHands() in script.js.
+  pt-parts: floating emoji container populated by pageTransition().
+-->
+<div id="pg-tr">
+  <div class="pt-wrap">
+    <div class="pt-ring"></div>
+    <svg viewBox="0 0 72 72" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <circle cx="36" cy="36" r="33" fill="var(--bg-card)" stroke="var(--orange)" stroke-width="2.5"/>
+      <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(90 36 36)"/>
+      <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(180 36 36)"/>
+      <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(270 36 36)"/>
+      <line id="pt-h" x1="36" y1="36" x2="36" y2="20" stroke="var(--tx)"  stroke-width="3.2" stroke-linecap="round"/>
+      <line id="pt-m" x1="36" y1="36" x2="36" y2="10" stroke="var(--tx)"  stroke-width="2"   stroke-linecap="round"/>
+      <line id="pt-s" x1="36" y1="40" x2="36" y2="9"  stroke="var(--red)" stroke-width="1.2" stroke-linecap="round"/>
+      <circle cx="36" cy="36" r="2.8" fill="var(--orange)"/>
+    </svg>
+    <div class="pt-parts" id="pt-parts"></div>
+  </div>
+  <p class="pt-msg" id="pt-msg">One moment…</p>
+</div>
+
+<!-- ================================================================
+     MAIN APP CARD
+================================================================ -->
+<main class="container">
+  <div class="smx-card">
+
+    <!-- ==============================================================
+         AUTH SECTION — #auth-sec
+         Prasidha: Replace with Azure AD MSAL redirect on SSO migration.
+         Map: displayName→U.name | employeeId→U.id
+         No changes needed in #main-sec after that migration.
+    ============================================================== -->
+    <section id="auth-sec">
+
+      <!-- Login header: logo + module name + daily greeting -->
+      <div class="auth-hdr">
+        <img src="NEW Seamex logo_testing march 11.png"
+          alt="Seamex Logo" class="auth-logo">
+        <p class="mod-name">Geo Attendance</p>
+        <p id="daily-greet"></p>
+      </div>
+
+      <!-- Centered welcome title -->
+      <p class="auth-title">Welcome — Start Your Day</p>
+
+      <!--
+        inp-name: Employee full name.
+        Validation in script.js: isValidName → /^[a-zA-Z\s]{2,60}$/
+        Error shown inline below when invalid.
+      -->
+      <div class="inp-wrap">
+        <input type="text" id="inp-name"
+          placeholder="Full Name"
+          maxlength="60"
+          autocomplete="off" autocorrect="off"
+          spellcheck="false" autocapitalize="words"
+          inputmode="text">
+        <div class="err-msg" id="err-name">Alphabets and spaces only (min 2 chars)</div>
+      </div>
+
+      <!--
+        inp-id: Poornata employee ID number.
+        Validation in script.js: isValidId → /^[0-9]{3,12}$/
+        inputmode="numeric" shows numpad on mobile.
+      -->
+      <div class="inp-wrap mt8">
+        <input type="text" id="inp-id"
+          placeholder="Poornata ID (numbers only)"
+          inputmode="numeric" pattern="[0-9]*"
+          maxlength="12" autocomplete="off">
+        <div class="err-msg" id="err-id">Numbers only, 3–12 digits</div>
+      </div>
+
+      <!--
+        Inline clock loader — shown when Start Day is clicked.
+        Hands: ac-h (hour), ac-m (minute), ac-s (second).
+        Rotated by tickHands('ac-h','ac-m','ac-s') in script.js.
+        CSS cubic-bezier transition gives smooth motion.
+        ld-msg: loader message text set from LOADER_MSGS array.
+      -->
+      <div id="inline-loader" class="hidden mt12">
+        <svg id="auth-clock"
+          style="display:block;margin:0 auto 10px;filter:drop-shadow(0 4px 12px rgba(245,130,32,.2))"
+          width="68" height="68" viewBox="0 0 72 72" fill="none">
+          <circle cx="36" cy="36" r="33" fill="var(--bg-solid)" stroke="var(--orange)" stroke-width="2.5"/>
+          <!-- 12 hour markers: thick at 12/3/6/9, thin at others -->
+          <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(30 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(60 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(90 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(120 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(150 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(180 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(210 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(240 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="11" stroke="var(--txm)" stroke-width="2.2" stroke-linecap="round" transform="rotate(270 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(300 36 36)"/>
+          <line x1="36" y1="5"  x2="36" y2="10" stroke="var(--txm)" stroke-width="1.2" stroke-linecap="round" transform="rotate(330 36 36)"/>
+          <!-- Clock hands — CSS transition on transform does the easing -->
+          <line id="ac-h" x1="36" y1="36" x2="36" y2="19" stroke="var(--tx)"  stroke-width="3.2" stroke-linecap="round" class="hand-h"/>
+          <line id="ac-m" x1="36" y1="36" x2="36" y2="10" stroke="var(--tx)"  stroke-width="2"   stroke-linecap="round" class="hand-m"/>
+          <line id="ac-s" x1="36" y1="40" x2="36" y2="8"  stroke="var(--red)" stroke-width="1.2" stroke-linecap="round" class="hand-s"/>
+          <circle cx="36" cy="36" r="2.8" fill="var(--orange)"/>
+        </svg>
+        <p class="ld-txt" id="ld-msg">Starting your day…</p>
+      </div>
+
+      <!-- Start Day CTA — disabled until both inputs pass validation -->
+      <button class="btn-full btn-red mt12" id="btn-start" disabled>
+        Start Day
+      </button>
+
+      <!-- Auth footer: theme toggle + recovery button + disclaimer -->
+      <div class="smx-footer">
+        <div class="ftr-left">
+          <!--
+            theme-btn: cycles auto→light→dark→auto via cycleTheme().
+            .t-ico and .t-lbl updated by applyTheme() across all instances.
+          -->
+          <button class="theme-btn" onclick="cycleTheme()">
+            <span class="t-ico">🌙</span>
+            <span class="t-lbl">Dark</span>
+          </button>
+          <!--
+            Recovery button — hidden by default.
+            markBusy() shows it after 5s of a stuck GPS button.
+            clearBusy() hides it when GPS resolves (any outcome).
+            Click: recoverState() in script.js — DOM-only, URL unchanged.
+          -->
+          <div class="rcv-wrap">
+            <button class="rcv-btn hidden" onclick="recoverState()">↺</button>
+            <div class="rcv-tip hidden">Page stuck? Tap to recover</div>
+          </div>
+        </div>
+        <p class="ftr-disc">By using this app you confirm<br>your location data is accurate.</p>
+      </div>
+    </section>
+
+    <!-- ==============================================================
+         MAIN SECTION — #main-sec
+         Prasidha: Contains all post-login screens.
+         Shown by renderMain(). Hidden by default.
+    ============================================================== -->
+    <section id="main-sec" class="hidden">
+
+      <!--
+        MAIN HEADER
+        Left:  disp-name (U.name) + disp-id (U.id)
+        Right: logo + "GEO ATTENDANCE" + hdr-clock (live) + hdr-date (live)
+        hdr-clock updated every second by startMainLoop() rAF loop.
+      -->
+      <div class="main-hdr">
+        <div class="mhl">
+          <div class="mhl-name" id="disp-name"></div>
+          <div class="mhl-id"   id="disp-id"></div>
+        </div>
+        <div class="mhr">
+          <img src="NEW Seamex logo_testing march 11.png"
+            alt="Seamex Logo" class="logo-sm">
+          <div class="mhr-mod">Geo Attendance</div>
+          <div class="mhr-cr">
+            <span class="mhr-ct-lbl">Now</span>
+            <span class="mhr-clock" id="hdr-clock">--:--:--</span>
+          </div>
+          <div class="mhr-date" id="hdr-date">--</div>
+        </div>
+      </div>
+
+      <!--
+        STATUS CARD — #status-card
+        Hidden until clock-in. Remains visible through clock-out and review.
+        Left column (col-dur):  Shift Duration — updated live by rAF loop.
+        Right column (col-in):  Clock-in time + location badge.
+      -->
+      <div class="status-card hidden" id="status-card">
+        <div class="sc-col col-dur">
+          <div class="sc-lbl">Shift Duration</div>
+          <div class="dur-val" id="timer-val">00:00:00</div>
+        </div>
+        <div class="sc-col col-in">
+          <div class="sc-lbl">Clocked In At</div>
+          <div class="sc-val" id="ci-time">--:--</div>
+          <div class="sc-loc" id="ci-loc">--</div>
+        </div>
+      </div>
+
+      <!-- ===========================================================
+           CLOCK-IN GROUP — #ci-grp
+           in-chips: last 3 locations as quick-select pills.
+           in-loc: location name input (isValidLoc in script.js).
+           in-drop: autocomplete dropdown (built by renderDrop).
+           btn-ci: fires clock-in GPS flow.
+      =========================================================== -->
+      <div id="ci-grp">
+        <div class="chips-row" id="in-chips"></div>
+        <div class="inp-wrap">
+          <input type="text" id="in-loc"
+            placeholder="Enter clock-in location name"
+            maxlength="60" autocomplete="off">
+          <div class="err-msg" id="err-in-loc">Letters, numbers, spaces and hyphens only</div>
+          <div class="ac-drop" id="in-drop"></div>
+        </div>
+        <button class="btn-full btn-ora mt8" id="btn-ci">Clock In</button>
+      </div>
+
+      <!-- ===========================================================
+           CLOCK-OUT GROUP — #co-grp
+           redo-banner: shown only in redo mode. Shows previous out details.
+           out-chips, out-loc, out-drop, btn-co: same pattern as clock-in.
+           btn-co GPS flow now has `finally` block — freeze is impossible.
+      =========================================================== -->
+      <div id="co-grp" class="hidden">
+        <!--
+          Redo banner: visible when inRedoMode=true.
+          redo-prev: "Previously: HH:MM at Location" set by showRedoBanner().
+        -->
+        <div id="redo-banner" class="redo-banner hidden">
+          <span class="redo-ico">↩</span>
+          <div>
+            <div class="redo-title">Redo Clock-Out</div>
+            <div class="redo-sub">Your previous clock-out will be overridden on new submit.</div>
+            <div class="redo-prev" id="redo-prev"></div>
+          </div>
+        </div>
+        <div class="chips-row" id="out-chips"></div>
+        <div class="inp-wrap">
+          <input type="text" id="out-loc"
+            placeholder="Enter clock-out location name"
+            maxlength="60" autocomplete="off">
+          <div class="err-msg" id="err-out-loc">Letters, numbers, spaces and hyphens only</div>
+          <div class="ac-drop" id="out-drop"></div>
+        </div>
+        <button class="btn-full btn-cri mt8" id="btn-co">Clock Out</button>
+      </div>
+
+      <!-- ===========================================================
+           GHOST SKELETON — #ghost-scr
+           Shown during GPS fetch (clock-in, clock-out, redo clock-out).
+           ghost-note: message from GHOST_NOTES array set by JS.
+      =========================================================== -->
+      <div id="ghost-scr" class="hidden">
+        <div class="skel sl sw30"></div>
+        <div class="skel sb"></div>
+        <div class="skel sl sw85"></div>
+        <div class="skel sl sw60"></div>
+        <p class="ghost-note" id="ghost-note">Your timings are being stored safely…</p>
+      </div>
+
+      <!-- ===========================================================
+           REVIEW CARD — #review-wrap
+           Shown after clock-out. User reviews before final submit.
+           r-in-t/r-in-l: clock-in time + location (from U).
+           r-out-t/r-out-l: clock-out time + location (from U).
+           r-dur: shift duration (from duration() in script.js).
+           Fix Clock-In → promptFixIn() → modal (name only, time sealed).
+           Redo Clock-Out → promptRedoOut() → modal disclaimer.
+      =========================================================== -->
+      <div id="review-wrap" class="hidden">
+        <div class="review-card">
+          <div class="rv-hdr">Review your shift before submitting</div>
+          <div class="rv-row">
+            <div class="rdot dot-in"></div>
+            <div class="rv-det">
+              <div class="rv-lbl">Clock In</div>
+              <div class="rv-time"  id="r-in-t">--</div>
+              <div class="rv-place" id="r-in-l">--</div>
+            </div>
+          </div>
+          <div class="rv-row">
+            <div class="rdot dot-out"></div>
+            <div class="rv-det">
+              <div class="rv-lbl">Clock Out</div>
+              <div class="rv-time"  id="r-out-t">--</div>
+              <div class="rv-place" id="r-out-l">--</div>
+            </div>
+          </div>
+          <div class="rv-row">
+            <div class="rdot dot-dur"></div>
+            <div class="rv-det">
+              <div class="rv-lbl">Total Duration</div>
+              <div class="rv-time" id="r-dur">--</div>
+            </div>
+          </div>
+          <div class="edit-row">
+            <button class="btn-edit" onclick="promptFixIn()">✏️ Fix Clock-In</button>
+            <button class="btn-edit" onclick="promptRedoOut()">↩ Redo Clock-Out</button>
+          </div>
+        </div>
+        <button class="btn-full btn-grn" id="btn-submit">Submit the Day ✓</button>
+      </div>
+
+      <!-- ===========================================================
+           SUCCESS CARD — #suc-card
+           Visible all day after submission. Stays until new calendar day.
+           Tick + continuous halo rings (never stop animating — by design).
+           ss-in-t/l: clock-in time + location.
+           ss-out-t/l: clock-out time + location.
+           ss-dur: total duration. ss-date: full date string.
+      =========================================================== -->
+      <div id="suc-card" class="success-card hidden">
+        <div class="tick-wrap">
+          <!-- Three staggered halo rings — infinite animation via CSS -->
+          <div class="halo"></div>
+          <div class="halo"></div>
+          <div class="halo"></div>
+          <div class="tick-solid">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+              <path class="tick-path"
+                d="M4 12L9 17L20 7"
+                stroke="#fff" stroke-width="2.6"
+                stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+        <p class="suc-lbl">Shift Submitted</p>
+        <div class="suc-grid">
+          <div class="sg-row">
+            <div class="sg-lbl">Clock In</div>
+            <div class="sg-val"   id="ss-in-t">--</div>
+            <div class="sg-place" id="ss-in-l">--</div>
+          </div>
+          <div class="sg-div"></div>
+          <div class="sg-row">
+            <div class="sg-lbl">Clock Out</div>
+            <div class="sg-val"   id="ss-out-t">--</div>
+            <div class="sg-place" id="ss-out-l">--</div>
+          </div>
+          <div class="sg-div"></div>
+          <div class="sg-row">
+            <div class="sg-lbl">Duration</div>
+            <div class="sg-val" id="ss-dur">--</div>
+          </div>
+          <div class="sg-div"></div>
+          <div class="sg-row">
+            <div class="sg-lbl">Date</div>
+            <div class="sg-date" id="ss-date">--</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main section footer: same structure as auth footer -->
+      <div class="smx-footer">
+        <div class="ftr-left">
+          <button class="theme-btn" onclick="cycleTheme()">
+            <span class="t-ico">🌙</span>
+            <span class="t-lbl">Dark</span>
+          </button>
+          <div class="rcv-wrap">
+            <button class="rcv-btn hidden" onclick="recoverState()">↺</button>
+            <div class="rcv-tip hidden">Page stuck? Tap to recover</div>
+          </div>
+        </div>
+        <p class="ftr-disc">Location data is captured for<br>attendance purposes only.</p>
+      </div>
+
+    </section>
+  </div><!-- /.smx-card -->
+</main>
+
+<!--
+  App script — loaded last so all DOM elements are available.
+  Prasidha: script.js contains all business logic, GPS, state management.
+-->
+<script src="script.js"></script>
+
+</body>
+</html>

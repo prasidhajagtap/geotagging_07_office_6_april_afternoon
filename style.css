@@ -1,0 +1,726 @@
+/*
+ * ══════════════════════════════════════════════════════════════
+ *  SEAMEX GEO-ATTENDANCE  |  style.css  |  v07
+ *  Author : Prasidha Jagtap
+ *  Role   : Assistant Manager – IT, Aditya Birla Group (Seamex)
+ *
+ *  CSS ARCHITECTURE INDEX
+ *  ─────────────────────────────────────────────────────────────
+ *  1.  DESIGN TOKENS        :root + light + dark theme variables
+ *  2.  BASE                 body, html
+ *  3.  AMBIENT BG           CRED-style time-of-day animation layers
+ *  4.  CARD + CONTAINER     .smx-card, main.container
+ *  5.  RESPONSIVE           breakpoints 320px → iPad + foldables
+ *  6.  PAGE TRANSITION      full-screen clock overlay (#pg-tr)
+ *  7.  TOAST OVERLAY        centered blur-backdrop toast
+ *  8.  MODAL OVERLAY        confirmation dialog
+ *  9.  AUTH LAYOUT          login header, title, inputs
+ *  10. MAIN HEADER          name+ID left | logo+clock right
+ *  11. INPUTS               text inputs, error messages
+ *  12. AUTOCOMPLETE + CHIPS dropdown, quick-select pills
+ *  13. BUTTONS              .btn-full variants + .btn-edit
+ *  14. STATUS CARD          two distinct columns: duration | clocked-in
+ *  15. SVG CLOCK HANDS      smooth CSS transition, inline loader
+ *  16. GHOST SKELETON       shimmer animation
+ *  17. REVIEW CARD          pre-submit review
+ *  18. REDO BANNER          context card in redo mode
+ *  19. SUCCESS CARD         tick + halo + grid
+ *  20. FOOTER               theme toggle + recovery button + disclaimer
+ *  21. UTILITY              .hidden, spacing helpers
+ * ══════════════════════════════════════════════════════════════
+ */
+
+/* ================================================================
+   1. DESIGN TOKENS — Prasidha
+   All brand values here. Touch only this block for rebranding.
+   CSS custom properties cascade through every component below.
+================================================================ */
+:root {
+  /* Seamex brand colours */
+  --red:     #A6192E;    /* Primary action, error states         */
+  --red-dk:  #7d1220;    /* Hover state for red buttons          */
+  --orange:  #F58220;    /* Shift timer, accent                  */
+  --yellow:  #FFCB05;    /* Gradient end, ambient glow           */
+  --grad:    linear-gradient(135deg,#F58220,#FFCB05);
+  --green:   #16a34a;    /* Success states                       */
+
+  /* Pico CSS overrides */
+  --pico-primary:       var(--red);
+  --pico-primary-hover: var(--red-dk);
+  --pico-font-family:   'DM Sans',system-ui,sans-serif;
+
+  /* Shape */
+  --r-sm:.5rem;  --r-md:.75rem; --r-lg:1rem;
+  --r-xl:1.5rem; --r-pill:999px;
+
+  /* Animation */
+  --ease:  cubic-bezier(.4,0,.2,1);
+  --spring:cubic-bezier(.22,1,.36,1);  /* spring feel for transitions */
+  --t:     .22s;
+
+  /* Elevation */
+  --sh-sm: 0 2px 10px  rgba(0,0,0,.07);
+  --sh-md: 0 8px 28px  rgba(0,0,0,.10);
+  --sh-lg: 0 16px 48px rgba(0,0,0,.16);
+}
+
+/* Light theme tokens — Prasidha */
+[data-theme="light"] {
+  --bg-a:  #edf2f7;  --bg-b: #dce6f0;   /* body gradient stops      */
+  --bg-card:rgba(255,255,255,.93);        /* glass card               */
+  --bg-solid:#fff;                         /* pure white surfaces      */
+  --bg-in:rgba(255,255,255,.96);           /* input backgrounds        */
+  --bg-sub:rgba(248,250,253,.94);          /* subtle containers        */
+  --bdr:rgba(0,0,0,.08);                   /* all borders              */
+  --tx:#1a1a2e; --tx2:#4a5568; --txm:#8a9ab5;
+  --chip-bg:rgba(166,25,46,.07);
+  --chip-bdr:rgba(166,25,46,.18);
+  --chip-tx:var(--red);
+  --sk-a:rgba(0,0,0,.07); --sk-b:rgba(0,0,0,.03);  /* skeleton shimmer */
+}
+
+/* Dark theme tokens — Prasidha */
+[data-theme="dark"] {
+  --bg-a:#0c0c1a; --bg-b:#121224;
+  --bg-card:rgba(22,22,42,.94);
+  --bg-solid:#181830;
+  --bg-in:rgba(255,255,255,.06);
+  --bg-sub:rgba(255,255,255,.04);
+  --bdr:rgba(255,255,255,.09);
+  --tx:#e8edf5; --tx2:#8a9fc0; --txm:#50607a;
+  --chip-bg:rgba(245,130,32,.12);
+  --chip-bdr:rgba(245,130,32,.25);
+  --chip-tx:var(--orange);
+  --sk-a:rgba(255,255,255,.08); --sk-b:rgba(255,255,255,.02);
+  --pico-form-element-background-color:var(--bg-in);
+}
+
+/* ================================================================
+   2. BASE
+================================================================ */
+*,*::before,*::after { box-sizing:border-box }
+html { height:-webkit-fill-available }
+
+body {
+  font-family:'DM Sans',system-ui,sans-serif;
+  background:linear-gradient(160deg,var(--bg-a),var(--bg-b));
+  background-attachment:fixed;
+  min-height:100dvh;
+  min-height:-webkit-fill-available;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  /* iOS safe-area: Dynamic Island, notch, home indicator */
+  padding:
+    max(16px,env(safe-area-inset-top))
+    max(12px,env(safe-area-inset-right))
+    max(20px,env(safe-area-inset-bottom))
+    max(12px,env(safe-area-inset-left));
+  overflow-x:hidden; position:relative;
+  transition:background .5s ease;
+}
+
+/* ================================================================
+   3. AMBIENT BACKGROUND — Prasidha (CRED-style)
+   Pure CSS. data-tod set once by JS at page load.
+   Four time slots: dawn · day · dusk · night
+   All elements are radial-gradient dots — no images, no SVG.
+   Zero JS runtime cost after the initial attribute set.
+================================================================ */
+body::before, body::after {
+  content:''; position:fixed; inset:0;
+  pointer-events:none; z-index:0;
+}
+/* Dawn (5–9am): warm sunrise rising from bottom */
+body[data-tod="dawn"]::before {
+  background:
+    radial-gradient(ellipse 70% 50% at 50% 100%,rgba(255,140,60,.16),transparent),
+    radial-gradient(ellipse 40% 30% at 50% 85%, rgba(255,200,100,.10),transparent);
+  animation:ambPulse 8s ease infinite alternate;
+}
+body[data-tod="dawn"]::after {
+  background:
+    radial-gradient(circle 4px at 22% 28%,rgba(255,190,90,.5),transparent),
+    radial-gradient(circle 2px at 70% 18%,rgba(255,200,110,.4),transparent),
+    radial-gradient(circle 3px at 48% 12%,rgba(255,170,70,.35),transparent);
+  animation:ambFloat 11s ease infinite alternate;
+}
+/* Day (9am–3pm): bright sun glow + drifting cloud wisps */
+body[data-tod="day"]::before {
+  background:
+    radial-gradient(ellipse 60% 40% at 72% 8%, rgba(255,255,180,.18),transparent),
+    radial-gradient(ellipse 30% 22% at 18% 14%,rgba(200,230,255,.12),transparent);
+  animation:ambPulse 10s ease infinite alternate;
+}
+body[data-tod="day"]::after {
+  background:
+    radial-gradient(ellipse 130px 32px at 22% 10%,rgba(255,255,255,.18),transparent),
+    radial-gradient(ellipse  80px 20px at 64%  7%,rgba(255,255,255,.12),transparent),
+    radial-gradient(ellipse 110px 26px at 44%  4%,rgba(255,255,255,.10),transparent);
+  animation:ambDrift 20s linear infinite;
+}
+/* Dusk (3–6pm): golden hour warm particles */
+body[data-tod="dusk"]::before {
+  background:
+    radial-gradient(ellipse 80% 50% at 50% 100%,rgba(220,90,30,.18),transparent),
+    radial-gradient(ellipse 50% 35% at 82% 88%, rgba(255,160,60,.12),transparent);
+  animation:ambPulse 7s ease infinite alternate;
+}
+body[data-tod="dusk"]::after {
+  background:
+    radial-gradient(circle 3px at 14% 24%,rgba(255,120,50,.45),transparent),
+    radial-gradient(circle 4px at 50% 18%,rgba(245,100,40,.32),transparent),
+    radial-gradient(circle 2px at 85% 34%,rgba(255,180,60,.38),transparent);
+  animation:ambFloat 9s ease infinite alternate;
+}
+/* Night (6pm–5am): twinkling star field */
+body[data-tod="night"]::before {
+  background:
+    radial-gradient(ellipse 50% 38% at 82% 14%,rgba(100,120,210,.10),transparent),
+    radial-gradient(ellipse 30% 18% at 18% 10%,rgba(80,90,180,.08),transparent);
+  animation:ambPulse 12s ease infinite alternate;
+}
+body[data-tod="night"]::after {
+  background:
+    radial-gradient(circle 1.5px at 10%  8%, rgba(255,255,255,.70),transparent),
+    radial-gradient(circle 1px   at 26% 15%, rgba(255,255,255,.50),transparent),
+    radial-gradient(circle 2px   at 62%  5%, rgba(255,255,255,.60),transparent),
+    radial-gradient(circle 1px   at 81% 12%, rgba(255,255,255,.50),transparent),
+    radial-gradient(circle 1.5px at 42% 21%, rgba(255,255,255,.40),transparent),
+    radial-gradient(circle 1px   at 91% 23%, rgba(255,255,255,.45),transparent);
+  animation:ambTwinkle 4s ease infinite alternate;
+}
+@keyframes ambPulse   { from{opacity:.5} to{opacity:1} }
+@keyframes ambFloat   { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-18px)} }
+@keyframes ambDrift   { from{transform:translateX(-5px)} to{transform:translateX(10px)} }
+@keyframes ambTwinkle { 0%,100%{opacity:.45} 50%{opacity:1} }
+
+/* ================================================================
+   4. CARD + CONTAINER — Prasidha
+   overflow:hidden clips the page-transition overlay at card edges.
+================================================================ */
+main.container {
+  position:relative; z-index:1;
+  width:100%; max-width:430px;
+  padding:0; margin:0 auto;
+}
+.smx-card {
+  background:var(--bg-card);
+  backdrop-filter:blur(24px); -webkit-backdrop-filter:blur(24px);
+  border:1px solid var(--bdr);
+  border-radius:var(--r-xl);
+  padding:26px 22px 18px;
+  box-shadow:var(--sh-md);
+  position:relative; z-index:1;
+  overflow:hidden;
+  transition:background var(--t) var(--ease);
+}
+
+/* ================================================================
+   5. RESPONSIVE — Prasidha
+   Tested: 320px (SE gen1) · 375-428px (standard) · 540-900px (foldable)
+           768px+ (tablet) · iOS Dynamic Island · Android gesture bar
+================================================================ */
+@media(max-width:374px){
+  main.container { max-width:100% }
+  .smx-card      { padding:18px 13px 14px; border-radius:var(--r-lg) }
+  .auth-logo     { width:90px!important }
+  .logo-sm       { width:48px!important }
+  input[type="text"] { padding:10px 12px!important; font-size:.86rem!important }
+  .btn-full      { padding:11px!important; font-size:.87rem!important }
+}
+@media(min-width:481px) and (max-width:900px){
+  main.container { max-width:500px }
+  .smx-card      { padding:32px 28px 22px }
+}
+@media(min-width:901px){ main.container { max-width:460px } }
+@media(min-width:540px) and (max-width:900px) and (orientation:landscape){
+  body      { justify-content:flex-start; overflow-y:auto }
+  .smx-card { padding:16px 24px }
+}
+
+/* ================================================================
+   6. PAGE TRANSITION — Prasidha
+   Full-screen overlay with ticking clock and floating time emojis.
+   Shown between: Login→ClockIn, ClockIn→ClockOut, ClockOut→Submit.
+================================================================ */
+#pg-tr {
+  position:fixed; inset:0; z-index:500;
+  display:flex; flex-direction:column;
+  align-items:center; justify-content:center;
+  background:var(--bg-a);
+  opacity:0; pointer-events:none;
+  transition:opacity .32s var(--ease);
+}
+#pg-tr.on { opacity:1; pointer-events:all }
+
+.pt-wrap   { position:relative; width:88px; height:88px; margin-bottom:18px }
+.pt-wrap svg { width:88px; height:88px }
+
+/* Pulsing ring around transition clock */
+.pt-ring {
+  position:absolute; inset:-12px; border-radius:50%;
+  border:2px solid var(--orange);
+  animation:ptRing 1.2s ease infinite;
+}
+@keyframes ptRing {
+  0%  { transform:scale(.84); opacity:.8 }
+  50% { transform:scale(1.12); opacity:.3 }
+  100%{ transform:scale(.84); opacity:.8 }
+}
+
+/* Floating time-emoji particles */
+.pt-parts { position:absolute; inset:0; pointer-events:none; overflow:visible }
+.pt-p     { position:absolute; font-size:1.2rem; opacity:0; animation:ptFloat 1.5s ease forwards }
+@keyframes ptFloat {
+  0%  { opacity:0; transform:translateY(0) scale(.7) }
+  20% { opacity:1 }
+  80% { opacity:.8 }
+  100%{ opacity:0; transform:translateY(-86px) scale(1.05) }
+}
+
+.pt-msg { font-size:.8rem; font-weight:500; font-style:italic; color:var(--tx2); animation:ptPulse 1.5s ease infinite }
+@keyframes ptPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+/* Transition clock hands */
+#pt-h,#pt-m,#pt-s {
+  transform-origin:36px 36px;
+  transition:transform .9s cubic-bezier(.45,.05,.55,.95);
+}
+#pt-s { transition-duration:.5s!important }
+
+/* ================================================================
+   7. TOAST OVERLAY — Prasidha (redesigned v07)
+   Single instance. Backdrop blur draws focus. 1.5s auto-dismiss.
+   Separate from modal (toasts require no user interaction).
+================================================================ */
+.toast-ov {
+  position:fixed; inset:0; z-index:9999;
+  display:flex; align-items:center; justify-content:center;
+  background:rgba(0,0,0,.08);
+  backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+  pointer-events:none;
+  animation:toOvIn .22s ease forwards;
+}
+.toast-ov.to-out { animation:toOvOut .28s ease forwards }
+@keyframes toOvIn  { from{opacity:0} to{opacity:1} }
+@keyframes toOvOut { from{opacity:1} to{opacity:0} }
+
+.toast-pill {
+  padding:13px 28px;
+  border-radius:var(--r-pill);
+  font-family:'DM Sans',sans-serif;
+  font-size:.86rem; font-weight:600;
+  background:rgba(28,28,50,.92); color:#fff;
+  box-shadow:var(--sh-lg);
+  backdrop-filter:blur(12px); -webkit-backdrop-filter:blur(12px);
+  max-width:min(84vw,300px); text-align:center;
+  animation:toPillUp .3s var(--spring) forwards;
+}
+.toast-pill.ok  { background:rgba(21,128,61,.92) }
+.toast-pill.err { background:rgba(185,28,28,.92) }
+@keyframes toPillUp {
+  from { opacity:0; transform:scale(.9) translateY(10px) }
+  to   { opacity:1; transform:scale(1)  translateY(0) }
+}
+
+/* ================================================================
+   8. MODAL OVERLAY — Prasidha
+   Used for: Fix Clock-In, Redo Clock-Out confirmations.
+================================================================ */
+#modal-ov {
+  position:fixed; inset:0; z-index:800;
+  background:rgba(0,0,0,.46);
+  backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px);
+  display:flex; align-items:center; justify-content:center;
+  padding:24px; opacity:0; pointer-events:none;
+  transition:opacity .28s var(--ease);
+}
+#modal-ov.open { opacity:1; pointer-events:all }
+
+.modal-card {
+  background:var(--bg-solid); border:1px solid var(--bdr);
+  border-radius:var(--r-xl); padding:26px 22px;
+  width:100%; max-width:338px; box-shadow:var(--sh-lg);
+  transform:translateY(16px) scale(.97);
+  transition:transform .28s var(--ease);
+}
+#modal-ov.open .modal-card { transform:translateY(0) scale(1) }
+
+/* Modal inner elements */
+.m-icon  { text-align:center; font-size:2rem; margin-bottom:8px }
+.m-title { font-size:1rem; font-weight:700; color:var(--tx); text-align:center; margin-bottom:6px }
+.m-body  { font-size:.82rem; color:var(--tx2); text-align:center; line-height:1.55; margin-bottom:18px }
+.m-btns  { display:flex; gap:8px }
+.m-btns .btn-full { margin:0; flex:1 }
+
+/* ================================================================
+   9. AUTH LAYOUT — Prasidha
+   Logo centered, module name, daily greeting, centered title.
+================================================================ */
+.auth-hdr  { text-align:center; margin-bottom:20px }
+.auth-logo {
+  display:block; width:108px; margin:0 auto 8px;
+  filter:drop-shadow(0 4px 14px rgba(166,25,46,.2));
+}
+.mod-name  {
+  font-size:1rem; font-weight:700; letter-spacing:.05em;
+  text-transform:uppercase; color:var(--red);
+  margin:4px 0 2px; text-align:center;
+}
+#daily-greet {
+  font-size:.77rem; font-style:italic; font-weight:500;
+  color:var(--orange); margin:5px 0 0; text-align:center;
+}
+/* Auth title — centered as requested */
+.auth-title {
+  font-size:1.05rem; font-weight:700;
+  text-align:center; color:var(--tx); margin:16px 0 13px;
+}
+
+/* ================================================================
+   10. MAIN HEADER — Prasidha
+   Left: employee name + Poornata ID
+   Right: Seamex logo · "GEO ATTENDANCE" · Now HH:MM:SS · date
+================================================================ */
+.main-hdr { display:flex; align-items:flex-start; justify-content:space-between; gap:8px; margin-bottom:14px }
+
+/* Left block */
+.mhl      { flex:1; min-width:0 }
+.mhl-name { font-size:.9rem; font-weight:700; color:var(--tx); white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.mhl-id   { font-size:.66rem; color:var(--txm); font-family:'DM Mono',monospace; margin-top:2px }
+
+/* Right block */
+.mhr     { text-align:right; flex-shrink:0 }
+.logo-sm {
+  width:60px; height:auto; display:block;
+  margin-left:auto; margin-bottom:5px;
+  filter:drop-shadow(0 2px 8px rgba(166,25,46,.16));
+}
+.mhr-mod    { font-size:.55rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--red) }
+.mhr-cr     { display:flex; align-items:center; justify-content:flex-end; gap:5px; margin-top:2px }
+.mhr-ct-lbl { font-size:.52rem; text-transform:uppercase; letter-spacing:.07em; color:var(--txm); font-weight:600 }
+.mhr-clock  { font-size:.82rem; font-weight:500; font-family:'DM Mono',monospace; color:var(--tx) }
+.mhr-date   { font-size:.68rem; font-weight:600; color:var(--tx2); margin-top:3px }
+
+/* ================================================================
+   11. INPUTS — Prasidha
+   Consistent padding, font, border, and focus ring on every input.
+   Error messages use the same .err-msg style across all pages.
+================================================================ */
+.inp-wrap { position:relative; margin-bottom:8px }
+
+input[type="text"] {
+  width:100%; padding:12px 14px;
+  border-radius:var(--r-md);
+  border:1.5px solid var(--bdr);
+  background:var(--bg-in); color:var(--tx);
+  font-family:'DM Sans',sans-serif; font-size:.92rem;
+  outline:none; -webkit-appearance:none; margin:0;
+  transition:border-color var(--t) var(--ease),box-shadow var(--t) var(--ease);
+}
+input[type="text"]:focus {
+  border-color:var(--orange);
+  box-shadow:0 0 0 3px rgba(245,130,32,.12);
+}
+input[type="text"]::placeholder { color:var(--txm) }
+
+/* Error messages — same style on every page (Prasidha) */
+.err-msg { font-size:.68rem; color:var(--red); padding:3px 2px 0; display:none }
+
+/* ================================================================
+   12. AUTOCOMPLETE + CHIPS — Prasidha
+================================================================ */
+.ac-drop {
+  position:absolute; top:calc(100% + 4px); left:0; right:0;
+  background:var(--bg-solid); border:1px solid var(--bdr);
+  border-radius:var(--r-md); box-shadow:var(--sh-md);
+  z-index:300; max-height:156px; overflow-y:auto; display:none;
+}
+.ac-drop.open { display:block }
+
+.ac-item {
+  display:flex; align-items:center; gap:7px;
+  padding:9px 12px; font-size:.84rem; color:var(--tx); cursor:pointer;
+  transition:background var(--t);
+}
+.ac-item:hover { background:var(--chip-bg) }
+
+/* Quick-select chip pills — last 3 used locations */
+.chips-row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:9px }
+
+/* Pico override: chips must NOT be full width */
+.chip {
+  display:inline-flex!important; align-items:center; gap:4px;
+  padding:4px 11px!important; border-radius:var(--r-pill)!important;
+  font-size:.7rem!important; font-weight:500;
+  background:var(--chip-bg)!important;
+  color:var(--chip-tx)!important;
+  border:1px solid var(--chip-bdr)!important;
+  cursor:pointer; width:auto!important; margin:0!important;
+  max-width:135px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  transition:all var(--t) var(--ease)!important;
+}
+.chip:hover {
+  background:var(--red)!important;
+  color:#fff!important;
+  border-color:var(--red)!important;
+}
+
+/* ================================================================
+   13. BUTTONS — Prasidha
+   .btn-full: full-width CTA base class.
+   .btn-edit: auto-width inline action buttons.
+   Colour variants: .btn-red .btn-ora .btn-cri .btn-grn
+================================================================ */
+.btn-full {
+  display:block; width:100%; padding:13px 20px;
+  border-radius:var(--r-md); border:none;
+  font-family:'DM Sans',sans-serif; font-size:.93rem; font-weight:600;
+  cursor:pointer; text-align:center;
+  -webkit-tap-highlight-color:transparent;
+  transition:all var(--t) var(--ease); letter-spacing:.01em;
+}
+.btn-full:active   { transform:scale(.98) }
+.btn-full:disabled { opacity:.36; cursor:not-allowed; transform:none!important }
+
+.btn-red { background:var(--red); color:#fff; box-shadow:0 4px 14px rgba(166,25,46,.28) }
+.btn-red:not(:disabled):hover { background:var(--red-dk); transform:translateY(-1px); box-shadow:0 6px 18px rgba(166,25,46,.38) }
+
+.btn-ora { background:var(--grad); color:#fff; box-shadow:0 4px 14px rgba(245,130,32,.28) }
+.btn-ora:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(245,130,32,.38) }
+
+.btn-cri { background:#dc2626; color:#fff; box-shadow:0 4px 14px rgba(220,38,38,.22) }
+.btn-cri:not(:disabled):hover { background:#b91c1c; transform:translateY(-1px) }
+
+.btn-grn { background:linear-gradient(135deg,#15803d,#22c55e); color:#fff; box-shadow:0 4px 14px rgba(34,197,94,.28) }
+.btn-grn:not(:disabled):hover { transform:translateY(-1px); box-shadow:0 6px 18px rgba(34,197,94,.38) }
+
+/* Inline edit buttons — Pico auto-width override */
+.btn-edit {
+  display:inline-flex; align-items:center; justify-content:center;
+  flex:1; min-width:108px; padding:8px 12px;
+  border-radius:var(--r-md); border:1px solid var(--bdr);
+  background:var(--bg-solid); color:var(--tx2);
+  font-family:'DM Sans',sans-serif; font-size:.72rem; font-weight:600;
+  cursor:pointer; width:auto!important;
+  transition:all var(--t) var(--ease);
+}
+.btn-edit:hover { border-color:var(--orange); color:var(--orange); background:rgba(245,130,32,.06) }
+
+/* ================================================================
+   14. STATUS CARD — Prasidha
+   Two DISTINCT columns.
+   Left (col-dur): Shift Duration — orange border, big mono timer.
+   Right (col-in): Clocked-In time + location badge — red border.
+================================================================ */
+.status-card { display:flex; gap:10px; margin-bottom:14px }
+.sc-col {
+  flex:1; border-radius:var(--r-lg);
+  padding:13px 10px; text-align:center;
+  border:1.5px solid transparent;
+}
+/* Shift Duration column */
+.col-dur { background:rgba(245,130,32,.09); border-color:rgba(245,130,32,.28) }
+/* Clocked-In column */
+.col-in  { background:rgba(166,25,46,.07);  border-color:rgba(166,25,46,.22) }
+
+[data-theme="dark"] .col-dur { background:rgba(245,130,32,.15); border-color:rgba(245,130,32,.38) }
+[data-theme="dark"] .col-in  { background:rgba(166,25,46,.16);  border-color:rgba(166,25,46,.32) }
+
+.sc-lbl  { font-size:.56rem; font-weight:700; letter-spacing:.09em; text-transform:uppercase; color:var(--txm); margin-bottom:5px }
+/* Large orange timer value */
+.dur-val { font-size:1.38rem; font-weight:700; color:var(--orange); font-family:'DM Mono',monospace; letter-spacing:-.02em; line-height:1 }
+.sc-val  { font-size:.9rem; font-weight:700; color:var(--tx); font-family:'DM Mono',monospace }
+
+/* Location badge pill inside column */
+.sc-loc {
+  display:inline-block; margin-top:5px;
+  background:rgba(166,25,46,.10); border:1px solid rgba(166,25,46,.20);
+  border-radius:var(--r-pill); padding:2px 9px;
+  font-size:.63rem; font-weight:600; color:var(--red);
+  max-width:100%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+}
+[data-theme="dark"] .sc-loc { background:rgba(245,130,32,.12); border-color:rgba(245,130,32,.28); color:var(--orange) }
+
+/* ================================================================
+   15. SVG CLOCK HANDS + INLINE LOADER — Prasidha
+   CSS cubic-bezier transition on transform = GPU-composited.
+   JS sets angle once/second. CSS eases smoothly between angles.
+   .hand-s has shorter transition (second hand snaps more crisply).
+================================================================ */
+.hand-h, .hand-m, .hand-s {
+  transform-origin:36px 36px;
+  transition:transform .9s cubic-bezier(.45,.05,.55,.95);
+}
+.hand-s { transition-duration:.5s!important }
+
+#inline-loader { text-align:center; padding:14px 0 6px }
+.ld-txt { font-size:.76rem; font-weight:500; font-style:italic; color:var(--tx2); animation:ldPulse 2s ease infinite; padding:0 6px }
+@keyframes ldPulse { 0%,100%{opacity:.5} 50%{opacity:1} }
+
+/* ================================================================
+   16. GHOST SKELETON — Prasidha
+   Shimmer animation during GPS fetch and submit network call.
+================================================================ */
+.skel {
+  border-radius:var(--r-sm);
+  background:linear-gradient(90deg,var(--sk-a) 25%,var(--sk-b) 50%,var(--sk-a) 75%);
+  background-size:200% 100%;
+  animation:shimmer 1.7s ease infinite;
+}
+@keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+.sl { height:12px; margin-bottom:9px }
+.sb { height:52px; width:100%; border-radius:var(--r-md); margin-bottom:10px }
+.sw30 { width:30% } .sw60 { width:60% } .sw85 { width:85% }
+
+.ghost-note { font-size:.73rem; font-style:italic; color:var(--txm); text-align:center; padding:9px 0; animation:ldPulse 2s ease infinite }
+
+/* ================================================================
+   17. REVIEW CARD — Prasidha
+   Pre-submit review of shift details.
+   Edit row has Fix Clock-In and Redo Clock-Out buttons.
+================================================================ */
+.review-card {
+  background:var(--bg-sub); border:1px solid var(--bdr);
+  border-radius:var(--r-lg); padding:18px 16px; margin-bottom:14px;
+}
+.rv-hdr   { font-size:.58rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--txm); margin-bottom:14px }
+.rv-row   { display:flex; align-items:flex-start; gap:10px; padding:10px 0; border-bottom:1px solid var(--bdr) }
+.rv-row:last-of-type { border-bottom:none }
+.rdot     { width:9px; height:9px; border-radius:50%; margin-top:5px; flex-shrink:0 }
+.dot-in   { background:var(--orange) }
+.dot-out  { background:var(--red) }
+.dot-dur  { background:#22c55e }
+.rv-det   { flex:1 }
+.rv-lbl   { font-size:.58rem; text-transform:uppercase; letter-spacing:.08em; color:var(--txm); font-weight:600 }
+.rv-time  { font-size:1rem; font-weight:700; color:var(--tx); font-family:'DM Mono',monospace; margin-top:2px }
+.rv-place { font-size:.74rem; color:var(--tx2); margin-top:2px }
+.edit-row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap }
+
+/* ================================================================
+   18. REDO BANNER — Prasidha
+   Context card inside co-grp when inRedoMode is true.
+   Shows previous clock-out time + location so user knows what
+   will be overridden.
+================================================================ */
+.redo-banner {
+  display:flex; align-items:flex-start; gap:11px; padding:12px 14px;
+  background:rgba(220,38,38,.06); border:1px solid rgba(220,38,38,.18);
+  border-radius:var(--r-md); margin-bottom:13px;
+}
+[data-theme="dark"] .redo-banner { background:rgba(220,38,38,.10); border-color:rgba(220,38,38,.25) }
+.redo-ico   { font-size:1.1rem; margin-top:1px; flex-shrink:0 }
+.redo-title { font-size:.8rem; font-weight:700; color:var(--red) }
+.redo-sub   { font-size:.7rem; color:var(--tx2); margin-top:3px; line-height:1.4 }
+.redo-prev  { font-size:.68rem; font-family:'DM Mono',monospace; color:var(--txm); margin-top:4px }
+
+/* ================================================================
+   19. SUCCESS CARD — Prasidha
+   Visible all day after submission. Minimal, centered, no emojis.
+   Continuous halo rings animate forever (never stop — by design).
+================================================================ */
+.success-card {
+  text-align:center;
+  animation:cardUp .45s var(--ease);
+}
+@keyframes cardUp { from{opacity:0;transform:translateY(14px) scale(.97)} to{opacity:1;transform:translateY(0) scale(1)} }
+
+/* Tick ring + halo system */
+.tick-wrap { position:relative; width:60px; height:60px; margin:0 auto 14px }
+.halo      { position:absolute; border-radius:50%; border:2px solid #22c55e; animation:haloEx 2s ease infinite }
+.halo:nth-child(1) { inset:-8px;  animation-delay:0s }
+.halo:nth-child(2) { inset:-18px; animation-delay:.65s }
+.halo:nth-child(3) { inset:-28px; animation-delay:1.3s }
+@keyframes haloEx {
+  0%  { transform:scale(.84); opacity:.75 }
+  60% { transform:scale(1.16); opacity:.2  }
+  100%{ transform:scale(.84); opacity:0   }
+}
+.tick-solid {
+  width:60px; height:60px; border-radius:50%;
+  background:#22c55e; display:flex; align-items:center; justify-content:center;
+  position:relative; z-index:2;
+  animation:popIn .5s var(--ease) .1s both;
+}
+@keyframes popIn { 0%{transform:scale(0);opacity:0} 65%{transform:scale(1.14)} 100%{transform:scale(1);opacity:1} }
+.tick-path { stroke-dasharray:30; animation:drawTick .4s ease .5s both }
+@keyframes drawTick { from{stroke-dashoffset:30;opacity:0} to{stroke-dashoffset:0;opacity:1} }
+
+/* Success labels and data grid */
+.suc-lbl  { font-size:.72rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--green); margin-bottom:18px }
+.suc-grid { background:var(--bg-sub); border:1px solid rgba(34,197,94,.14); border-radius:var(--r-lg); overflow:hidden; text-align:center }
+.sg-row   { padding:14px 18px }
+.sg-lbl   { font-size:.56rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--txm); margin-bottom:5px }
+.sg-val   { font-size:1rem; font-weight:700; color:var(--tx); font-family:'DM Mono',monospace }
+.sg-place { font-size:.72rem; color:var(--tx2); margin-top:3px }
+.sg-date  { font-size:.84rem; font-weight:600; color:var(--tx2) }
+.sg-div   { height:1px; background:var(--bdr) }
+
+/* ================================================================
+   20. FOOTER — Prasidha
+   Inside card, bottom of every section.
+   Left:  theme toggle button + recovery button (side by side)
+   Right: disclaimer text
+================================================================ */
+.smx-footer {
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  margin-top:16px; padding-top:12px; border-top:1px solid var(--bdr);
+}
+.ftr-left { display:flex; align-items:center; gap:7px }
+
+/* Theme toggle — Pico width:100% override */
+.theme-btn {
+  display:inline-flex!important; align-items:center; gap:5px;
+  padding:6px 12px!important; border-radius:var(--r-pill)!important;
+  background:var(--bg-sub)!important; border:1px solid var(--bdr)!important;
+  font-family:'DM Sans',sans-serif; font-size:.67rem; font-weight:600;
+  color:var(--tx2)!important; cursor:pointer;
+  width:auto!important; margin:0!important; flex-shrink:0;
+  transition:all var(--t) var(--ease)!important;
+}
+.theme-btn:hover { border-color:var(--orange)!important; color:var(--orange)!important }
+
+/* Recovery button — FIX-06 (Prasidha)
+   Hidden by default. Shown after 5s stuck via markBusy().
+   Spinning ↺ icon + tooltip indicates recoverable state.
+   Click: recoverState() — DOM-only, session preserved. */
+.rcv-wrap { position:relative }
+
+.rcv-btn {
+  display:inline-flex!important; align-items:center; justify-content:center;
+  padding:5px 9px!important; border-radius:var(--r-pill)!important;
+  background:rgba(245,130,32,.10)!important;
+  border:1px solid rgba(245,130,32,.30)!important;
+  color:var(--orange)!important;
+  font-size:.9rem; font-weight:700; cursor:pointer;
+  width:auto!important; margin:0!important;
+  transition:all .2s ease!important;
+}
+.rcv-btn:hover { background:rgba(245,130,32,.22)!important; transform:scale(1.08) }
+.rcv-btn:active { transform:scale(.96) }
+
+/* Spinning animation — active when stuck */
+@keyframes spin { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
+.rcv-spin { animation:spin 1.5s linear infinite }
+
+/* Tooltip bubble */
+.rcv-tip {
+  position:absolute; bottom:calc(100% + 7px); left:0;
+  background:rgba(28,28,50,.92); color:#fff;
+  font-size:.62rem; font-weight:500; font-family:'DM Sans',sans-serif;
+  padding:5px 11px; border-radius:var(--r-pill);
+  white-space:nowrap; box-shadow:var(--sh-md);
+  backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px);
+  animation:rcvTipIn .22s ease forwards;
+}
+@keyframes rcvTipIn { from{opacity:0;transform:translateY(4px)} to{opacity:1;transform:translateY(0)} }
+
+.ftr-disc { font-size:.57rem; color:var(--txm); line-height:1.4; text-align:right; flex:1 }
+
+/* ================================================================
+   21. UTILITY
+================================================================ */
+.hidden { display:none!important }
+.mt8    { margin-top:8px  }
+.mt12   { margin-top:12px }

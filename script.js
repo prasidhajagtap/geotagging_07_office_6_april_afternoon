@@ -151,9 +151,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedTheme = localStorage.getItem(KEY_THEME) || 'auto';
   _themeMode = savedTheme;
   applyTheme(_themeMode);
-function setTx(
+function setTx () {
   setTx('daily-greet', GREETINGS[new Date().getDay()]);
-);
+}
   const lastId = localStorage.getItem(KEY_ID);
   if (lastId) { const el = g('inp-id'); if (el) el.value = lastId; }
 

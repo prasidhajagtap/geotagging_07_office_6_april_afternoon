@@ -109,6 +109,34 @@ const KEY_THEME = 'smx_theme';
 const KEY_LOCS  = 'smx_locs';
 const MAX_LOCS  = 6;
 
+/* ── HELPERS (hoisted) ───────────────────────────────────────
+   Prasidha: Declared as `function` so they are fully hoisted.
+   `const` arrow functions are NOT hoisted — using them above
+   their declaration throws ReferenceError (temporal dead zone).
+   Keep these as `function` declarations. Do not convert to const.
+────────────────────────────────────────────────────────────── */
+
+/** g — Prasidha: shorthand getElementById, used everywhere */
+function g(id) { return document.getElementById(id); }
+
+/** setTx — Prasidha: safely sets textContent, no-ops if element missing */
+function setTx(id, v) { const e = g(id); if (e) e.textContent = v; }
+
+/** hide — Prasidha: adds .hidden class (display:none!important in CSS) */
+function hide(id) { g(id)?.classList.add('hidden'); }
+
+/** show — Prasidha: removes .hidden class */
+function show(id) { g(id)?.classList.remove('hidden'); }
+
+/** nowISO — Prasidha: current timestamp as ISO 8601 string */
+function nowISO() { return new Date().toISOString(); }
+
+/** rnd — Prasidha: random element from array */
+function rnd(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+/** save — Prasidha: serializes U state to localStorage */
+function save() { localStorage.setItem(KEY_USER, JSON.stringify(U)); }
+
 /* ── CONTENT ARRAYS ──────────────────────────────────────────
    Prasidha: All UI copy here. Edit freely without touching logic.
 ────────────────────────────────────────────────────────────── */
@@ -151,9 +179,9 @@ window.addEventListener('DOMContentLoaded', () => {
   const savedTheme = localStorage.getItem(KEY_THEME) || 'auto';
   _themeMode = savedTheme;
   applyTheme(_themeMode);
-function setTx () {
+
   setTx('daily-greet', GREETINGS[new Date().getDay()]);
-}
+
   const lastId = localStorage.getItem(KEY_ID);
   if (lastId) { const el = g('inp-id'); if (el) el.value = lastId; }
 
@@ -398,8 +426,6 @@ function setupLoginValidation() {
    START DAY
    Prasidha: Re-validates on click (not just on input events).
 */
-console.log(g); // Error: Cannot access 'g' before initialisation
-let g = "some value";
 g('btn-start').addEventListener('click', () => {
   const name = g('inp-name').value.trim();
   const id   = g('inp-id').value.trim();
@@ -1114,29 +1140,8 @@ function toast(msg, type = '') {
 }
 
 /* ══════════════════════════════════════════════════════════════
-   HELPERS — Prasidha
+   HELPERS — see top of file for hoisted function declarations
 */
-
-/** g — shorthand getElementById */
-g = id => document.getElementById(id);
-
-/** setTx — sets textContent safely, no-ops if element missing */
-const setTx = (id, v) => { const e = g(id); if (e) e.textContent = v; };
-
-/** hide — adds .hidden (display:none!important) */
-const hide = id => g(id)?.classList.add('hidden');
-
-/** show — removes .hidden */
-const show = id => g(id)?.classList.remove('hidden');
-
-/** nowISO — current timestamp as ISO 8601 */
-const nowISO = () => new Date().toISOString();
-
-/** rnd — random element from array */
-const rnd = arr => arr[Math.floor(Math.random() * arr.length)];
-
-/** save — serializes U to localStorage */
-const save = () => localStorage.setItem(KEY_USER, JSON.stringify(U));
 
 /**
  * isNewDay — Prasidha

@@ -975,25 +975,55 @@ function recoverState() {
    the button is guaranteed to re-enable in under 9 seconds.
 */
 async function getCoords() {
-  /* Geo promise — resolves from getCurrentPosition */
+  /*
+   * FIX-05 v2 (Prasidha) — Two bugs in previous version:
+   *
+   * BUG-A: safetyPromise used a plain setTimeout with no reference to
+   *   cancel it. When geoPromise resolved first (GPS success), Promise.race
+   *   returned immediately, but the safety setTimeout kept running in the
+   *   background and fired its toast() 9s later — even though GPS had already
+   *   succeeded. This caused the "Location request timed out" toast to appear
+   *   randomly mid-session with no user action pending.
+   *
+   * BUG-B: If the geo error callback (code 3, timeout at 8s) fired first,
+   *   the safety timer would also fire 1s later showing a second toast for
+   *   the same failure.
+   *
+   * FIX: Use a shared `safetyId` reference so geoPromise callbacks can
+   *   clearTimeout() the safety timer the moment GPS settles.
+   *   Use a `settled` flag so only ONE toast ever fires per getCoords() call.
+   *   Toast only shown when an action is genuinely needed from the user.
+   */
+  let safetyId  = null; /* setTimeout reference — cleared on geo settle */
+  let settled   = false; /* prevents duplicate toasts from race conditions */
+
   const geoPromise = new Promise(resolve => {
     if (!navigator.geolocation) {
       toast('Geolocation not supported on this device.', 'err');
+      settled = true;
       return resolve(null);
     }
 
     navigator.geolocation.getCurrentPosition(
-      pos => resolve(
-        `${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`
-      ),
+      pos => {
+        /* GPS success — cancel safety timer before it fires spuriously */
+        clearTimeout(safetyId);
+        settled = true;
+        resolve(`${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`);
+      },
       err => {
-        /* SECURITY: Safe messages. Never expose raw err (Prasidha) */
-        const msgs = {
-          1: 'Location access denied. Allow it in your browser settings.',
-          2: 'Location unavailable. Please try again.',
-          3: 'Location request timed out. Please try again.'
-        };
-        toast(msgs[err.code] || 'Location error. Please try again.', 'err');
+        /* GPS error — cancel safety timer, show exactly one toast */
+        clearTimeout(safetyId);
+        if (!settled) {
+          settled = true;
+          /* SECURITY: Safe messages only. Never expose raw err (Prasidha) */
+          const msgs = {
+            1: 'Location access denied. Allow it in your browser settings.',
+            2: 'Location unavailable. Please try again.',
+            3: 'Location timed out. Please try again.'
+          };
+          toast(msgs[err.code] || 'Location error. Please try again.', 'err');
+        }
         resolve(null);
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
@@ -1001,15 +1031,18 @@ async function getCoords() {
     );
   });
 
-  /* Safety promise — hard 9s ceiling, resolves null */
-  const safetyPromise = new Promise(resolve =>
-    setTimeout(() => {
-      toast('Location request timed out. Please try again.', 'err');
+  /* Safety promise — absolute 9s ceiling. Only shows toast if geo never fired. */
+  const safetyPromise = new Promise(resolve => {
+    safetyId = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        toast('Location timed out. Please try again.', 'err');
+      }
       resolve(null);
-    }, 9000)
-  );
+    }, 9000);
+  });
 
-  /* Race: whichever resolves first wins — max wait is always 9s */
+  /* Race: whichever settles first wins. Safety timer always cancelled on geo settle. */
   return Promise.race([geoPromise, safetyPromise]);
 }
 

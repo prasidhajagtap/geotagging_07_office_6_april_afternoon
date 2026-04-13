@@ -977,43 +977,22 @@ function recoverState() {
 /* ══════════════════════════════════════════════════════════════
    ANDROID WEBVIEW LOCATION MODAL — Prasidha
    Shown when GPS permission is denied inside an Android WebView.
-   WebView does not expose browser settings to the user, so the
-   standard "Allow it in your browser settings" instruction is
-   not actionable. This modal gives two concrete options instead.
-   
-   HOST APP NOTE: The permanent fix requires the host app developer
-   to implement WebChromeClient.onGeolocationPermissionsShowPrompt()
-   — see the comment in getCoords() for the exact code needed.
+
+   Root cause: The host app already has OS-level location permission
+   granted. The WebView simply needs WebChromeClient to forward it.
+   Until the host app is updated, we try a network-accuracy fallback
+   (enableHighAccuracy: false) which some WebViews permit even when
+   they block fine GPS. If that also fails, we show this modal.
+
+   HOST APP FIX (one line of Java — see getCoords comment below).
 */
 function showWebViewModal() {
   showModal({
     icon: '📍',
-    title: 'Location Access Needed',
-    body: 'This app is running inside another app which is blocking GPS access. To clock in or out, please open this page directly in Chrome browser on your Android device.',
+    title: 'Location Access Blocked',
+    body: 'The app container is blocking GPS access for this module. Please contact your IT team to enable location in the app settings. Your IT reference: WebView GeolocationPermissions not forwarded.',
     buttons: [
-      {
-        label: 'Open in Chrome',
-        cls: 'btn-ora',
-        fn: () => {
-          /* Build a Chrome intent URL — opens the current page in Chrome */
-          const url = window.location.href;
-          /* Try Chrome intent first, fall back to just opening the URL */
-          const intentUrl = `intent://${url.replace(/^https?:\/\//, '')}#Intent;scheme=https;package=com.android.chrome;end`;
-          try {
-            window.location.href = intentUrl;
-          } catch (e) {
-            /* Fallback: copy URL to clipboard and prompt user */
-            if (navigator.clipboard) {
-              navigator.clipboard.writeText(url).then(() => {
-                toast('URL copied. Paste it in Chrome to open.', 'ok');
-              });
-            } else {
-              toast('Please open this URL in Chrome browser.', 'ok');
-            }
-          }
-        }
-      },
-      { label: 'Cancel', cls: 'btn-edit', fn: null }
+      { label: 'OK, Got It', cls: 'btn-ora', fn: null }
     ]
   });
 }
@@ -1021,118 +1000,100 @@ function showWebViewModal() {
 
 async function getCoords() {
   /*
-   * getCoords — Prasidha (FIX-05 v3)
+   * getCoords — Prasidha (FIX-05 v4 — Android WebView fix)
    *
-   * ANDROID WEBVIEW FIX (v08):
-   * When the app runs inside an Android WebView (e.g. embedded in the
-   * Leadership Dashboard app), Android OS does NOT automatically forward
-   * location permission to the WebView — unlike iOS WKWebView which inherits
-   * it from the host app automatically.
+   * CONTEXT:
+   * The host app (Leadership Dashboard) already has OS-level location
+   * permission granted on both Android and iOS. The problem on Android
+   * is that the WebView container requires one additional configuration
+   * by the host app developer to forward that permission into the WebView:
    *
-   * Root cause: error code 1 (PERMISSION_DENIED) fires immediately inside
-   * Android WebView even when the user would normally allow it, because the
-   * host app has not called WebChromeClient.onGeolocationPermissionsShowPrompt().
-   *
-   * Two-part fix applied here:
-   *   1. Detect Android WebView from user agent string.
-   *   2. On error code 1 inside WebView: show a specific actionable message
-   *      directing the user to open in Chrome instead of just "browser settings",
-   *      because WebView settings are not user-accessible.
-   *
-   * HOST APP FIX (requires host app developer — Prasidha):
-   * The Android host app's WebView must implement:
-   *
+   *   HOST APP FIX — Java (one addition, Prasidha):
+   *   ─────────────────────────────────────────────
    *   webView.setWebChromeClient(new WebChromeClient() {
    *     @Override
    *     public void onGeolocationPermissionsShowPrompt(
    *         String origin, GeolocationPermissions.Callback callback) {
+   *       // Forward the already-granted OS permission into the WebView
    *       callback.invoke(origin, true, false);
    *     }
    *   });
    *
-   * AND the host app's AndroidManifest.xml must include:
+   *   AndroidManifest.xml must also declare (if not already present):
    *   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
    *   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
    *
-   * Until the host app is updated, users on Android WebView should open
-   * the app URL directly in Chrome browser for full GPS functionality.
+   * CLIENT-SIDE WORKAROUND (this function):
+   * Some Android WebViews block enableHighAccuracy (fine GPS) but still
+   * allow network-based location (enableHighAccuracy: false). We try
+   * high accuracy first, then silently retry with network accuracy.
+   * This gives the best chance of getting a coordinate without needing
+   * the host app to be updated first.
    *
-   * SECURITY (Prasidha): Safe error messages only. Raw err object never exposed.
+   * SECURITY (Prasidha): Safe error messages only. Raw err never exposed.
    */
 
-  /* Detect Android WebView — Prasidha
-     Android WebView UA contains "wv" token or "Version/X.X Chrome" without "Mobile Safari".
-     This detection is used only for user-facing error message customisation. */
   const ua = navigator.userAgent || '';
-  const isAndroidWebView = /Android/.test(ua) && (/wv\)/.test(ua) || /Version\/\d/.test(ua));
+  /* Detect Android WebView: "wv)" in UA or Version/x.x without Mobile Safari */
+  const isAndroidWebView = /Android/.test(ua) &&
+    (/wv\)/.test(ua) || (/Version\/\d/.test(ua) && !/Mobile Safari/.test(ua)));
 
-  let safetyId = null;  /* setTimeout reference — cleared when GPS settles    */
-  let settled  = false; /* flag — ensures exactly ONE toast fires per call     */
+  /**
+   * attemptGPS — Prasidha
+   * Single GPS attempt with configurable accuracy.
+   * @param {boolean} highAccuracy
+   * @param {number}  timeoutMs
+   * @returns {Promise<string|null>}
+   */
+  function attemptGPS(highAccuracy, timeoutMs) {
+    return new Promise(resolve => {
+      navigator.geolocation.getCurrentPosition(
+        pos => resolve(
+          `${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`
+        ),
+        () => resolve(null),   /* resolve null on any error — caller decides next step */
+        { enableHighAccuracy: highAccuracy, timeout: timeoutMs, maximumAge: 0 }
+      );
+    });
+  }
 
-  const geoPromise = new Promise(resolve => {
+  if (!navigator.geolocation) {
+    toast('Geolocation is not supported on this device or browser.', 'err');
+    return null;
+  }
 
-    /* Check if geolocation API is present at all */
-    if (!navigator.geolocation) {
-      if (!settled) {
-        settled = true;
-        toast('Geolocation is not supported on this device or browser.', 'err');
-      }
-      return resolve(null);
-    }
+  /* ── Attempt 1: High-accuracy GPS (8s) ──────────────────── */
+  let coords = await Promise.race([
+    attemptGPS(true, 8000),
+    new Promise(r => setTimeout(() => r(null), 9000))  /* safety ceiling */
+  ]);
 
-    navigator.geolocation.getCurrentPosition(
-      pos => {
-        /* GPS success — cancel safety timer immediately (Prasidha: FIX-05 BUG-A) */
-        clearTimeout(safetyId);
-        settled = true;
-        resolve(`${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`);
-      },
-      err => {
-        /* GPS error — cancel safety timer, show exactly one message (FIX-05 BUG-B) */
-        clearTimeout(safetyId);
-        if (!settled) {
-          settled = true;
+  if (coords) return coords;
 
-          if (err.code === 1) {
-            /* PERMISSION_DENIED — different message for WebView vs browser */
-            if (isAndroidWebView) {
-              /* WebView: user cannot change settings from inside the app —
-                 direct them to open in Chrome instead (Prasidha: Android WebView fix) */
-              showWebViewModal();
-            } else {
-              toast('Location access denied. Allow it in your browser settings.', 'err');
-            }
-          } else if (err.code === 2) {
-            toast('Location unavailable. Please try again.', 'err');
-          } else if (err.code === 3) {
-            toast('Location timed out. Please try again.', 'err');
-          } else {
-            toast('Location error. Please try again.', 'err');
-          }
-        }
-        resolve(null);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout:    8000,
-        maximumAge: 0     /* always fresh GPS — never a cached stale position (Prasidha) */
-      }
-    );
-  });
+  /* ── Attempt 2: Network-accuracy fallback (5s) ───────────
+     Some Android WebViews block fine GPS but allow network location.
+     Prasidha: silent retry — user sees nothing until both fail.  */
+  coords = await Promise.race([
+    attemptGPS(false, 5000),
+    new Promise(r => setTimeout(() => r(null), 6000))
+  ]);
 
-  /* Safety promise — absolute 9s ceiling. Only shows toast if geo never fired. */
-  const safetyPromise = new Promise(resolve => {
-    safetyId = setTimeout(() => {
-      if (!settled) {
-        settled = true;
-        toast('Location timed out. Please try again.', 'err');
-      }
-      resolve(null);
-    }, 9000);
-  });
+  if (coords) return coords;
 
-  /* Race: whichever settles first wins. Safety timer always cancelled on geo settle. */
-  return Promise.race([geoPromise, safetyPromise]);
+  /* ── Both attempts failed ─────────────────────────────────
+     Show the appropriate error message based on context.        */
+  if (isAndroidWebView) {
+    /* Inside Android WebView: OS permission exists but WebView hasn't
+       forwarded it. Show IT-contact modal — user cannot fix this themselves.
+       Prasidha: do NOT suggest "browser settings" — that is not accessible
+       from inside a WebView container.                           */
+    showWebViewModal();
+  } else {
+    /* Standard browser: user denied permission or GPS unavailable */
+    toast('Location access denied. Allow it in your browser settings.', 'err');
+  }
+
+  return null;
 }
 
 /* ══════════════════════════════════════════════════════════════

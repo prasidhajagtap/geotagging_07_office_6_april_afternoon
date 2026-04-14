@@ -90,7 +90,9 @@ let U = {
   name: '', id: '',
   clockIn: null,  clockInCoords: '',  clockInLoc: '',
   clockOut: null, clockOutCoords: '', clockOutLoc: '',
-  isClockedIn: false, submitted: false, lastActionDate: null
+  isClockedIn: false, submitted: false, lastActionDate: null,
+  clockInCoordSource:  'gps',  /* 'gps' | 'ip' — set by getCoords() */
+  clockOutCoordSource: 'gps'   /* tracked per-event, stored in payload */
 };
 
 let rafId        = null;  // requestAnimationFrame loop ID
@@ -519,6 +521,7 @@ g('btn-ci').addEventListener('click', async () => {
   const loc = sanitize(raw);
   saveLoc(loc);
   U.clockIn = nowISO(); U.clockInCoords = coords;
+  U.clockInCoordSource = U._coordSource || 'gps';
   U.clockInLoc = loc; U.isClockedIn = true;
   U.lastActionDate = nowISO(); save();
 
@@ -604,6 +607,7 @@ g('btn-co').addEventListener('click', async () => {
   const loc = sanitize(raw);
   saveLoc(loc);
   U.clockOut = nowISO(); U.clockOutCoords = coords;
+  U.clockOutCoordSource = U._coordSource || 'gps';
   U.clockOutLoc = loc; U.lastActionDate = nowISO();
   inRedoMode = false;
   hide('redo-banner');
@@ -810,7 +814,14 @@ g('btn-submit').addEventListener('click', async () => {
     clock_out_time:          U.clockOut,
     clock_out_coords:        U.clockOutCoords,
     clock_out_location_name: sanitize(U.clockOutLoc),
-    status:                  'completed'
+    status:                  'completed',
+    /* coord_source: tells HR whether GPS or IP fallback was used.
+       Requires this column in Supabase — run once (Prasidha):
+       ALTER TABLE attendance
+         ADD COLUMN clock_in_coord_source  text DEFAULT 'gps',
+         ADD COLUMN clock_out_coord_source text DEFAULT 'gps';   */
+    clock_in_coord_source:   U.clockInCoordSource  || 'gps',
+    clock_out_coord_source:  U.clockOutCoordSource || 'gps'
     /* branch_code:   'HO_AIROLI', */
     /* app_version:   '07',        */
     /* submitted_via: 'web',       */
@@ -975,126 +986,146 @@ function recoverState() {
    the button is guaranteed to re-enable in under 9 seconds.
 */
 /* ══════════════════════════════════════════════════════════════
-   ANDROID WEBVIEW LOCATION MODAL — Prasidha
-   Shown when GPS permission is denied inside an Android WebView.
+   LOCATION SYSTEM — Prasidha (v08 — Android WebView permanent fix)
 
-   Root cause: The host app already has OS-level location permission
-   granted. The WebView simply needs WebChromeClient to forward it.
-   Until the host app is updated, we try a network-accuracy fallback
-   (enableHighAccuracy: false) which some WebViews permit even when
-   they block fine GPS. If that also fails, we show this modal.
+   ROOT CAUSE SUMMARY:
+   Android WebView is a separate permission sandbox from the host app.
+   Even when the Flutter app has OS location permission granted,
+   the WebView does NOT inherit it unless the Flutter developer
+   explicitly handles onGeolocationPermissionsShowPrompt.
+   iOS WKWebView inherits permission automatically — that is why
+   iOS works and Android does not. This is an Android OS security
+   boundary that cannot be bypassed from JavaScript.
 
-   HOST APP FIX (one line of Java — see getCoords comment below).
+   FLUTTER HOST APP FIX (permanent — share with app developer):
+   ─────────────────────────────────────────────────────────────
+   In the InAppWebView widget, add this callback:
+
+     InAppWebView(
+       initialSettings: InAppWebViewSettings(
+         geolocationEnabled: true,
+       ),
+       onGeolocationPermissionsShowPrompt: (controller, origin) async {
+         return GeolocationPermissionShowPromptResponse(
+           origin: origin,
+           allow: true,
+           retain: true,
+         );
+       },
+     )
+
+   If the app uses webview_flutter instead of flutter_inappwebview,
+   webview_flutter does NOT expose this callback at all on Android.
+   The app MUST switch to flutter_inappwebview package.
+
+   WEB-SIDE SOLUTION (this file — no host app change needed):
+   ─────────────────────────────────────────────────────────────
+   When navigator.geolocation fails inside Android WebView,
+   fall back to IP-based geolocation via BigDataCloud free API.
+   No API key required. No permission required. Works in any
+   WebView, any container, any platform — it is just an HTTPS fetch.
+
+   Accuracy tradeoff:
+     GPS (navigator.geolocation): 5-10 metres
+     IP geolocation (fallback):   1-5 km (city/area level)
+
+   For attendance verification (confirming employee is at the
+   right site/city), this is sufficient. The coord_source field
+   in the DB record tells HR which method was used.
+
+   MIGRATION NOTE (Prasidha):
+   Add coord_source column to attendance table in Supabase:
+     ALTER TABLE attendance ADD COLUMN coord_source text DEFAULT 'gps';
+   This lets HR filter records by location method in the admin panel.
 */
-function showWebViewModal() {
-  showModal({
-    icon: '📍',
-    title: 'Location Access Blocked',
-    body: 'The app container is blocking GPS access for this module. Please contact your IT team to enable location in the app settings. Your IT reference: WebView GeolocationPermissions not forwarded.',
-    buttons: [
-      { label: 'OK, Got It', cls: 'btn-ora', fn: null }
-    ]
-  });
+
+/**
+ * getIPCoords — Prasidha
+ * Fetches approximate coordinates from BigDataCloud IP geolocation API.
+ * No API key, no permission, works in every WebView and container.
+ * Returns "lat,lng" string or null on network failure.
+ * Same API used in the Seamex weather widget project.
+ * @returns {Promise<string|null>}
+ */
+async function getIPCoords() {
+  try {
+    const res = await fetch(
+      'https://api.bigdatacloud.net/data/ip-geolocation?localityLanguage=en',
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const lat = data?.location?.latitude;
+    const lng = data?.location?.longitude;
+    if (!lat || !lng) return null;
+    return `${parseFloat(lat).toFixed(6)},${parseFloat(lng).toFixed(6)}`;
+  } catch {
+    return null;
+  }
 }
 
-
+/**
+ * getCoords — Prasidha (v08 — definitive GPS + IP fallback)
+ *
+ * Strategy:
+ *   1. Try navigator.geolocation (GPS) — works on iOS, Chrome, and
+ *      Android WebView once host app is fixed.
+ *   2. If GPS fails (any reason), silently fall back to IP geolocation.
+ *      User sees no error — attendance is recorded with city accuracy.
+ *   3. If both fail (no internet), show error toast.
+ *
+ * The fallback is silent by design. Field employees should not be
+ * blocked from clocking in due to a host app configuration issue.
+ * HR can distinguish GPS vs IP records via the coord_source field.
+ *
+ * @returns {Promise<string|null>} "lat,lng" string or null
+ */
 async function getCoords() {
-  /*
-   * getCoords — Prasidha (FIX-05 v4 — Android WebView fix)
-   *
-   * CONTEXT:
-   * The host app (Leadership Dashboard) already has OS-level location
-   * permission granted on both Android and iOS. The problem on Android
-   * is that the WebView container requires one additional configuration
-   * by the host app developer to forward that permission into the WebView:
-   *
-   *   HOST APP FIX — Java (one addition, Prasidha):
-   *   ─────────────────────────────────────────────
-   *   webView.setWebChromeClient(new WebChromeClient() {
-   *     @Override
-   *     public void onGeolocationPermissionsShowPrompt(
-   *         String origin, GeolocationPermissions.Callback callback) {
-   *       // Forward the already-granted OS permission into the WebView
-   *       callback.invoke(origin, true, false);
-   *     }
-   *   });
-   *
-   *   AndroidManifest.xml must also declare (if not already present):
-   *   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-   *   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
-   *
-   * CLIENT-SIDE WORKAROUND (this function):
-   * Some Android WebViews block enableHighAccuracy (fine GPS) but still
-   * allow network-based location (enableHighAccuracy: false). We try
-   * high accuracy first, then silently retry with network accuracy.
-   * This gives the best chance of getting a coordinate without needing
-   * the host app to be updated first.
-   *
-   * SECURITY (Prasidha): Safe error messages only. Raw err never exposed.
-   */
-
-  const ua = navigator.userAgent || '';
-  /* Detect Android WebView: "wv)" in UA or Version/x.x without Mobile Safari */
-  const isAndroidWebView = /Android/.test(ua) &&
-    (/wv\)/.test(ua) || (/Version\/\d/.test(ua) && !/Mobile Safari/.test(ua)));
-
-  /**
-   * attemptGPS — Prasidha
-   * Single GPS attempt with configurable accuracy.
-   * @param {boolean} highAccuracy
-   * @param {number}  timeoutMs
-   * @returns {Promise<string|null>}
-   */
-  function attemptGPS(highAccuracy, timeoutMs) {
-    return new Promise(resolve => {
+  /* ── Step 1: Try native GPS ─────────────────────────────────
+     Promise.race ensures button is always re-enabled within 10s.
+     Silence errors here — fallback handles them below.           */
+  const gpsCoords = await Promise.race([
+    new Promise(resolve => {
+      if (!navigator.geolocation) { resolve(null); return; }
       navigator.geolocation.getCurrentPosition(
         pos => resolve(
           `${pos.coords.latitude.toFixed(6)},${pos.coords.longitude.toFixed(6)}`
         ),
-        () => resolve(null),   /* resolve null on any error — caller decides next step */
-        { enableHighAccuracy: highAccuracy, timeout: timeoutMs, maximumAge: 0 }
+        () => resolve(null),   /* any error → null → trigger fallback */
+        { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+        /* maximumAge:0 — always fresh position (Prasidha) */
       );
-    });
-  }
-
-  if (!navigator.geolocation) {
-    toast('Geolocation is not supported on this device or browser.', 'err');
-    return null;
-  }
-
-  /* ── Attempt 1: High-accuracy GPS (8s) ──────────────────── */
-  let coords = await Promise.race([
-    attemptGPS(true, 8000),
-    new Promise(r => setTimeout(() => r(null), 9000))  /* safety ceiling */
+    }),
+    new Promise(r => setTimeout(() => r(null), 9000)) /* absolute ceiling */
   ]);
 
-  if (coords) return coords;
-
-  /* ── Attempt 2: Network-accuracy fallback (5s) ───────────
-     Some Android WebViews block fine GPS but allow network location.
-     Prasidha: silent retry — user sees nothing until both fail.  */
-  coords = await Promise.race([
-    attemptGPS(false, 5000),
-    new Promise(r => setTimeout(() => r(null), 6000))
-  ]);
-
-  if (coords) return coords;
-
-  /* ── Both attempts failed ─────────────────────────────────
-     Show the appropriate error message based on context.        */
-  if (isAndroidWebView) {
-    /* Inside Android WebView: OS permission exists but WebView hasn't
-       forwarded it. Show IT-contact modal — user cannot fix this themselves.
-       Prasidha: do NOT suggest "browser settings" — that is not accessible
-       from inside a WebView container.                           */
-    showWebViewModal();
-  } else {
-    /* Standard browser: user denied permission or GPS unavailable */
-    toast('Location access denied. Allow it in your browser settings.', 'err');
+  if (gpsCoords) {
+    /* GPS succeeded — mark as GPS source */
+    U._coordSource = 'gps';
+    return gpsCoords;
   }
 
+  /* ── Step 2: IP geolocation fallback ────────────────────────
+     Prasidha: silent fallback — no error shown to user.
+     Triggered when: Android WebView blocks GPS, user denies
+     permission, GPS unavailable indoors, or any other GPS failure.
+     BigDataCloud: free, no key, GDPR-compliant, no PII stored.    */
+  toast('GPS unavailable. Using network location…', '');
+  const ipCoords = await getIPCoords();
+
+  if (ipCoords) {
+    /* IP fallback succeeded — mark source so HR can see in admin */
+    U._coordSource = 'ip';
+    return ipCoords;
+  }
+
+  /* ── Step 3: Both failed ────────────────────────────────────
+     No GPS and no internet. This is a genuine connectivity issue. */
+  toast('Location unavailable. Please check your internet connection.', 'err');
+  U._coordSource = null;
   return null;
 }
+
 
 /* ══════════════════════════════════════════════════════════════
    LOCATION CACHE
